@@ -7,82 +7,164 @@
 
 import SwiftUI
 import CoreData
+import AVFoundation
+import Vision
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
-
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
+    @StateObject var viewModel = GameViewModel()
 
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-            Text("Select an item")
+        ZStack {
+            CameraViewControllerRepresentable(viewModel: viewModel)
+                .ignoresSafeArea()
+                .opacity(0)
+
+            Rectangle()
+                .frame(width: 50, height: 50)
+                .position(viewModel.position)
+                .edgesIgnoringSafeArea(.all)
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+        .onAppear {
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                if granted {
+                    viewModel.cameraAccessGranted = true
+                } else {
+                    print("Camera access not granted")
+                }
             }
         }
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+
+class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
+    var viewModel: GameViewModel
+
+    private let captureSession = AVCaptureSession()
+    private var leftEyeRequest = VNDetectFaceLandmarksRequest()
+    private var rightEyeRequest = VNDetectFaceLandmarksRequest()
+
+    init(viewModel: GameViewModel) {
+        self.viewModel = viewModel
+        super.init(nibName: nil, bundle: nil)
     }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupFrontCamera()
+        DispatchQueue.global().async {
+            self.captureSession.startRunning()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        DispatchQueue.global().async {
+            self.captureSession.stopRunning()
+        }
+    }
+
+    private func setupFrontCamera() {
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else { return }
+
+        do {
+            let input = try AVCaptureDeviceInput(device: camera)
+            let output = AVCaptureVideoDataOutput()
+            output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
+
+            captureSession.sessionPreset = .high
+            captureSession.addInput(input)
+            captureSession.addOutput(output)
+        } catch {
+            print("Error setting up front camera: \(error)")
+        }
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+            
+            do {
+                try imageRequestHandler.perform([leftEyeRequest, rightEyeRequest])
+                
+                guard let leftEye = leftEyeRequest.results?.first as? VNFaceObservation,
+                      let rightEye = rightEyeRequest.results?.first as? VNFaceObservation else { return }
+                
+                DispatchQueue.main.async {
+                    let leftEyePosition = self.getEyePosition(on: leftEye)
+                    let rightEyePosition = self.getEyePosition(on: rightEye)
+                    
+                    let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2,
+                                              y: (leftEyePosition.y + rightEyePosition.y) / 2)
+                    
+                    self.viewModel.position = CGPoint(x: eyePosition.y * UIScreen.main.bounds.width,
+                                                      y: (1 - eyePosition.x) * UIScreen.main.bounds.height)
+                }
+            } catch {
+                print("Error detecting eye landmarks: \(error)")
+            }
+        }
+        
+    private func getEyePosition(on faceObservation: VNFaceObservation) -> CGPoint {
+        guard let leftEye = faceObservation.landmarks?.leftEye,
+              let rightEye = faceObservation.landmarks?.rightEye else { return CGPoint(x: 0.5, y: 0.5) }
+
+        let leftEyePoints = leftEye.pointsInImage(imageSize: CGSize(width: 1, height: 1))
+        let rightEyePoints = rightEye.pointsInImage(imageSize: CGSize(width: 1, height: 1))
+
+        let leftEyePosition = CGPoint.average(points: leftEyePoints)
+        let rightEyePosition = CGPoint.average(points: rightEyePoints)
+
+        let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2, y: (leftEyePosition.y + rightEyePosition.y) / 2)
+
+        return eyePosition
+    }
+    
+}
+
+struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
+    var viewModel: GameViewModel
+
+    func makeUIViewController(context: Context) -> CameraViewController {
+        CameraViewController(viewModel: viewModel)
+    }
+
+    func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {}
+}
+
+class GameViewModel: NSObject, ObservableObject {
+    @Published var position: CGPoint = CGPoint(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY)
+    @Published var cameraAccessGranted: Bool = false {
+        didSet {
+            if cameraAccessGranted {
+                DispatchQueue.main.async {
+                    self.objectWillChange.send()
+                }
+            }
+        }
+    }
+}
+
+extension CGPoint {
+    static func +(lhs: CGPoint, rhs: CGPoint) -> CGPoint {
+        return CGPoint(x: lhs.x + rhs.x, y: lhs.y + rhs.y)
+    }
+
+    static func average(points: [CGPoint]) -> CGPoint {
+        let total = points.reduce(CGPoint.zero, +)
+        return CGPoint(x: total.x / CGFloat(points.count), y: total.y / CGFloat(points.count))
+    }
+}
+
+class EyeTrackingViewModel: ObservableObject {
+    @Published var position: CGPoint = .zero
+    @Published var isCameraAccessGranted: Bool = false
+    @Published var isCenterPositionSet: Bool = false
+    var centerPosition: CGPoint?
+    var isCameraAccessRequested: Bool = false
 }
