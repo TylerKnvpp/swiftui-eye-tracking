@@ -8,13 +8,10 @@
 import SwiftUI
 
 @main
-struct EyesApp: App {
-    let persistenceController = PersistenceController.shared
-
+struct EyeTrackingApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environment(\.managedObjectContext, persistenceController.container.viewContext)
         }
     }
 }

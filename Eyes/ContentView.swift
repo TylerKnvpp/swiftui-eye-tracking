@@ -15,14 +15,43 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
+            Color.black
+                .ignoresSafeArea()
+
             CameraViewControllerRepresentable(viewModel: viewModel)
                 .ignoresSafeArea()
                 .opacity(0)
 
-            Rectangle()
-                .frame(width: 50, height: 50)
-                .position(viewModel.position)
-                .edgesIgnoringSafeArea(.all)
+            if !viewModel.isCenterPositionSet {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 20, height: 20)
+                    .position(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY)
+
+                Text("Please look at the center of the screen")
+                    .foregroundColor(.white)
+                    .position(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY - 30)
+            } else {
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: 50, height: 50)
+                    .position(viewModel.position)
+                    .edgesIgnoringSafeArea(.all)
+            }
+
+            VStack {
+                Text("X: \(viewModel.position.x, specifier: "%.2f")")
+                    .foregroundColor(.white)
+                Text("Y: \(viewModel.position.y, specifier: "%.2f")")
+                    .foregroundColor(.white)
+                if viewModel.isCenterPositionSet {
+                    Text("Center X: \(viewModel.centerPosition.x, specifier: "%.2f")")
+                        .foregroundColor(.white)
+                    Text("Center Y: \(viewModel.centerPosition.y, specifier: "%.2f")")
+                        .foregroundColor(.white)
+                }
+            }
+            .position(x: UIScreen.main.bounds.midX, y: 30)
         }
         .onAppear {
             AVCaptureDevice.requestAccess(for: .video) { granted in
@@ -35,8 +64,6 @@ struct ContentView: View {
         }
     }
 }
-
-
 
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
     var viewModel: GameViewModel
@@ -86,30 +113,68 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-            
-            do {
-                try imageRequestHandler.perform([leftEyeRequest, rightEyeRequest])
-                
-                guard let leftEye = leftEyeRequest.results?.first as? VNFaceObservation,
-                      let rightEye = rightEyeRequest.results?.first as? VNFaceObservation else { return }
-                
-                DispatchQueue.main.async {
-                    let leftEyePosition = self.getEyePosition(on: leftEye)
-                    let rightEyePosition = self.getEyePosition(on: rightEye)
-                    
-                    let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2,
-                                              y: (leftEyePosition.y + rightEyePosition.y) / 2)
-                    
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+
+        do {
+            try imageRequestHandler.perform([leftEyeRequest, rightEyeRequest])
+
+            guard let leftEye = leftEyeRequest.results?.first as? VNFaceObservation,
+                  let rightEye = rightEyeRequest.results?.first as? VNFaceObservation else { return }
+
+            DispatchQueue.main.async {
+                let leftEyePosition = self.getEyePosition(on: leftEye)
+                let rightEyePosition = self.getEyePosition(on: rightEye)
+
+                let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2,
+                                          y: (leftEyePosition.y + rightEyePosition.y) / 2)
+
+                if !self.viewModel.isCenterPositionSet {
+                    self.viewModel.centerPosition = eyePosition
+                    self.viewModel.isCenterPositionSet = true
+                } else {
                     self.viewModel.position = CGPoint(x: eyePosition.y * UIScreen.main.bounds.width,
                                                       y: (1 - eyePosition.x) * UIScreen.main.bounds.height)
                 }
-            } catch {
-                print("Error detecting eye landmarks: \(error)")
             }
+        } catch {
+            print("Error detecting eye landmarks: \(error)")
         }
-        
+    }
+    
+//    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+//        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+//        let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+//
+//        do {
+//            try imageRequestHandler.perform([leftEyeRequest, rightEyeRequest])
+//
+//            guard let leftEye = leftEyeRequest.results?.first as? VNFaceObservation,
+//                  let rightEye = rightEyeRequest.results?.first as? VNFaceObservation else { return }
+//
+//            DispatchQueue.main.async {
+//                let leftEyePosition = self.getEyePosition(on: leftEye)
+//                let rightEyePosition = self.getEyePosition(on: rightEye)
+//
+//                let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2,
+//                                          y: (leftEyePosition.y + rightEyePosition.y) / 2)
+//
+//                if !self.viewModel.eyeTracking.centerPositionHasBeenSet {
+//                    self.viewModel.eyeTracking.setCenterPosition(eyePosition: eyePosition)
+//                } else {
+//                    let relativeEyePosition = self.viewModel.eyeTracking.getRelativeEyePosition(eyePosition: eyePosition)
+//
+//                    self.viewModel.position = CGPoint(
+//                        x: UIScreen.main.bounds.width / 2 + relativeEyePosition.x * UIScreen.main.bounds.width,
+//                        y: UIScreen.main.bounds.height / 2 - relativeEyePosition.y * UIScreen.main.bounds.height
+//                    )
+//                }
+//            }
+//        } catch {
+//            print("Error detecting eye landmarks: \(error)")
+//        }
+//    }
+
     private func getEyePosition(on faceObservation: VNFaceObservation) -> CGPoint {
         guard let leftEye = faceObservation.landmarks?.leftEye,
               let rightEye = faceObservation.landmarks?.rightEye else { return CGPoint(x: 0.5, y: 0.5) }
@@ -120,6 +185,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
         let leftEyePosition = CGPoint.average(points: leftEyePoints)
         let rightEyePosition = CGPoint.average(points: rightEyePoints)
 
+//        let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x))
         let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2, y: (leftEyePosition.y + rightEyePosition.y) / 2)
 
         return eyePosition
@@ -148,6 +214,22 @@ class GameViewModel: NSObject, ObservableObject {
             }
         }
     }
+    
+    var isCenterPositionSet: Bool = false
+    var centerPosition: CGPoint = CGPoint(x: 0.5, y: 0.5)
+
+    override init() {
+        super.init()
+        requestCameraAccess()
+    }
+
+    func requestCameraAccess() {
+        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+            DispatchQueue.main.async {
+                self?.cameraAccessGranted = granted
+            }
+        }
+    }
 }
 
 extension CGPoint {
@@ -159,12 +241,4 @@ extension CGPoint {
         let total = points.reduce(CGPoint.zero, +)
         return CGPoint(x: total.x / CGFloat(points.count), y: total.y / CGFloat(points.count))
     }
-}
-
-class EyeTrackingViewModel: ObservableObject {
-    @Published var position: CGPoint = .zero
-    @Published var isCameraAccessGranted: Bool = false
-    @Published var isCenterPositionSet: Bool = false
-    var centerPosition: CGPoint?
-    var isCameraAccessRequested: Bool = false
 }
