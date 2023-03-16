@@ -1,0 +1,15 @@
+# Build directories
+DerivedData/
+build/
+xcuserdata/
+
+# macOS system files
+.DS_Store
+
+# Xcode project user-specific files
+*.pbxuser
+project.xcworkspace/xcuserdata
+
+# Sensitive data
+secrets.plist
+keys.json
