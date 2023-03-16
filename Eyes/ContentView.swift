@@ -11,7 +11,7 @@ import AVFoundation
 import Vision
 
 struct ContentView: View {
-    @StateObject var viewModel = GameViewModel()
+    @StateObject var viewModel = EyeTrackingViewModel()
 
     var body: some View {
         ZStack {
@@ -66,13 +66,13 @@ struct ContentView: View {
 }
 
 class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
-    var viewModel: GameViewModel
+    var viewModel: EyeTrackingViewModel
 
     private let captureSession = AVCaptureSession()
     private var leftEyeRequest = VNDetectFaceLandmarksRequest()
     private var rightEyeRequest = VNDetectFaceLandmarksRequest()
 
-    init(viewModel: GameViewModel) {
+    init(viewModel: EyeTrackingViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
     }
@@ -130,8 +130,7 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
                                           y: (leftEyePosition.y + rightEyePosition.y) / 2)
 
                 if !self.viewModel.isCenterPositionSet {
-                    self.viewModel.centerPosition = eyePosition
-                    self.viewModel.isCenterPositionSet = true
+                    self.viewModel.setCenterPosition(eyePosition: eyePosition)
                 } else {
                     self.viewModel.position = CGPoint(x: eyePosition.y * UIScreen.main.bounds.width,
                                                       y: (1 - eyePosition.x) * UIScreen.main.bounds.height)
@@ -141,39 +140,6 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
             print("Error detecting eye landmarks: \(error)")
         }
     }
-    
-//    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-//        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-//        let imageRequestHandler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-//
-//        do {
-//            try imageRequestHandler.perform([leftEyeRequest, rightEyeRequest])
-//
-//            guard let leftEye = leftEyeRequest.results?.first as? VNFaceObservation,
-//                  let rightEye = rightEyeRequest.results?.first as? VNFaceObservation else { return }
-//
-//            DispatchQueue.main.async {
-//                let leftEyePosition = self.getEyePosition(on: leftEye)
-//                let rightEyePosition = self.getEyePosition(on: rightEye)
-//
-//                let eyePosition = CGPoint(x: (leftEyePosition.x + rightEyePosition.x) / 2,
-//                                          y: (leftEyePosition.y + rightEyePosition.y) / 2)
-//
-//                if !self.viewModel.eyeTracking.centerPositionHasBeenSet {
-//                    self.viewModel.eyeTracking.setCenterPosition(eyePosition: eyePosition)
-//                } else {
-//                    let relativeEyePosition = self.viewModel.eyeTracking.getRelativeEyePosition(eyePosition: eyePosition)
-//
-//                    self.viewModel.position = CGPoint(
-//                        x: UIScreen.main.bounds.width / 2 + relativeEyePosition.x * UIScreen.main.bounds.width,
-//                        y: UIScreen.main.bounds.height / 2 - relativeEyePosition.y * UIScreen.main.bounds.height
-//                    )
-//                }
-//            }
-//        } catch {
-//            print("Error detecting eye landmarks: \(error)")
-//        }
-//    }
 
     private func getEyePosition(on faceObservation: VNFaceObservation) -> CGPoint {
         guard let leftEye = faceObservation.landmarks?.leftEye,
@@ -190,11 +156,11 @@ class CameraViewController: UIViewController, AVCaptureVideoDataOutputSampleBuff
 
         return eyePosition
     }
-    
+
 }
 
 struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
-    var viewModel: GameViewModel
+    var viewModel: EyeTrackingViewModel
 
     func makeUIViewController(context: Context) -> CameraViewController {
         CameraViewController(viewModel: viewModel)
@@ -203,7 +169,7 @@ struct CameraViewControllerRepresentable: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {}
 }
 
-class GameViewModel: NSObject, ObservableObject {
+class EyeTrackingViewModel: NSObject, ObservableObject {
     @Published var position: CGPoint = CGPoint(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY)
     @Published var cameraAccessGranted: Bool = false {
         didSet {
@@ -217,6 +183,15 @@ class GameViewModel: NSObject, ObservableObject {
     
     var isCenterPositionSet: Bool = false
     var centerPosition: CGPoint = CGPoint(x: 0.5, y: 0.5)
+    
+    func setCenterPosition(eyePosition: CGPoint) {
+            centerPosition = eyePosition
+            isCenterPositionSet = true
+        }
+
+    func getRelativeEyePosition(eyePosition: CGPoint) -> CGPoint {
+        return CGPoint(x: eyePosition.x - centerPosition.x, y: eyePosition.y - centerPosition.y)
+    }
 
     override init() {
         super.init()
