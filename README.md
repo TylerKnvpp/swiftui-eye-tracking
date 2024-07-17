@@ -1,5 +1,5 @@
 # swiftui-simple-tracking
-Simple SwiftUI app that moves a square around the screen based on eye position relative to screen
+SwiftUI app that moves a square around the screen based on eye position relative to screen
 
 
 
